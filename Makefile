@@ -1,6 +1,6 @@
 ARCH            = x86_64
-OBJS            = main.o
 TARGET          = loader.efi
+OBJS            = main.o
 
 VERSION         ?= UNKNOWN
 
@@ -22,14 +22,14 @@ LDFLAGS         = -nostdlib -znocombreloc -T $(EFI_LDS) -shared -Bsymbolic $(EFI
 
 all: $(TARGET)
 
-%.so: %.o
-	ld $(LDFLAGS) $^ -o $@ -lefi -lgnuefi
-
-%.efi: %.so
-	objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-$(ARCH) $< $@
-
 main.o: main.c
-	gcc $(CFLAGS) -c $< -o $@
+	gcc $(CFLAGS) -c main.c -o main.o
+
+loader.so: main.o
+	ld $(LDFLAGS) main.o -o loader.so -lefi -lgnuefi
+
+loader.efi: loader.so
+	objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-$(ARCH) loader.so loader.efi
 
 clean:
 	rm -rf *.o *.so *.efi
