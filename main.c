@@ -4,7 +4,11 @@
 #define MAX_PATH_LEN 256
 #define BUFFER_SIZE  1024
 
-// 轉化 ASCII 字串為 UEFI Unicode (CHAR16)
+// 定義版本戳記（由 Makefile 在編譯時透過 -DVERSION 注入）
+#ifndef VERSION_STR
+#define VERSION_STR "UNKNOWN"
+#endif
+
 VOID AsciiToUnicode(CHAR8 *src, CHAR16 *dst, UINTN max_len) {
     UINTN i = 0;
     while (src[i] != '\0' && src[i] != '\r' && src[i] != '\n' && i < (max_len - 1)) {
@@ -14,7 +18,6 @@ VOID AsciiToUnicode(CHAR8 *src, CHAR16 *dst, UINTN max_len) {
     dst[i] = L'\0';
 }
 
-// 簡單解析 KEY=VALUE 格式
 VOID ParseConfigLine(CHAR8 *line, CHAR16 *driver_path, CHAR16 *boot_path) {
     if (line[0] == '#' || line[0] == ';' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
         return;
@@ -61,7 +64,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     CHAR16 DriverPath[MAX_PATH_LEN] = {0};
     CHAR16 BootPath[MAX_PATH_LEN] = {0};
 
-    // 1. 取得當前磁碟分割區根目錄
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&LoadedImage);
     if (EFI_ERROR(Status)) return Status;
 
@@ -71,11 +73,9 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     Status = uefi_call_wrapper(FileSystem->OpenVolume, 2, FileSystem, &RootDir);
     if (EFI_ERROR(Status)) return Status;
 
-    // 2. 嘗試讀取 \EFI\BOOT\loader.ini
     Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &IniFile, L"\\EFI\\BOOT\\loader.ini", EFI_FILE_MODE_READ, 0);
     
     if (EFI_ERROR(Status)) {
-        // 如果檔案不存在，自動建立並寫入預設內容
         CHAR8 *DefaultConfig = 
             "# UEFI Silent Loader Config\n"
             "DRIVER=\\EFI\\drivers\\UsbXbox360Dxe.efi\n"
@@ -89,11 +89,9 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
             uefi_call_wrapper(IniFile->Close, 1, IniFile);
         }
 
-        // 同時將預設值賦予變數
         StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
         StrCpy(BootPath, L"\\EFI\\BOOT\\grubx64.efi");
     } else {
-        // 檔案存在，進行讀取與解析
         CHAR8 Buffer[BUFFER_SIZE] = {0};
         UINTN ReadSize = BUFFER_SIZE - 1;
         Status = uefi_call_wrapper(IniFile->Read, 3, IniFile, &ReadSize, Buffer);
@@ -119,11 +117,9 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         }
     }
 
-    // 後備保險防呆
     if (DriverPath[0] == L'\0') StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
     if (BootPath[0] == L'\0')   StrCpy(BootPath, L"\\EFI\\BOOT\\grubx64.efi");
 
-    // 3. 靜默載入與執行 DXE 驅動
     EFI_HANDLE DriverHandle;
     EFI_DEVICE_PATH *DriverDevicePath = FileDevicePath(LoadedImage->DeviceHandle, DriverPath);
     if (DriverDevicePath != NULL) {
@@ -132,7 +128,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         }
     }
 
-    // 4. 靜默載入並交棒給 GRUB
     EFI_HANDLE GrubHandle;
     EFI_DEVICE_PATH *GrubDevicePath = FileDevicePath(LoadedImage->DeviceHandle, BootPath);
     if (GrubDevicePath != NULL) {
