@@ -97,7 +97,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         CHAR8 *DefaultConfig = 
             "# UEFI Silent Loader Config\n"
             "DRIVER=\\EFI\\drivers\\UsbXbox360Dxe.efi\n"
-            "BOOTLOADER=\\EFI\\BOOT\\grubx64.efi\n";
+            "BOOTLOADER=\\EFI\\BOOT\\bootx64.efi\n";
         
         // 自動建立並寫入預設的 loader.ini 檔案
         Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &IniFile, L"\\EFI\\BOOT\\loader.ini", 
@@ -112,7 +112,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         // 【修改點 B】在這裡更改程式碼內建的預設驅動與開機器路徑
         // ==========================================
         StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi"); // 預設驅動路徑
-        StrCpy(BootPath, L"\\EFI\\BOOT\\grubx64.efi");             // 預設交棒引導器路徑
+        StrCpy(BootPath, L"\\EFI\\BOOT\\bootx64.efi");             // 預設交棒引導器路徑
     } else {
         // 如果 loader.ini 存在，則讀取其內容進行解析
         CHAR8 Buffer[BUFFER_SIZE] = {0};
@@ -142,7 +142,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     // 防呆機制：如果路徑為空則賦予後備預設值
     if (DriverPath[0] == L'\0') StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
-    if (BootPath[0] == L'\0')   StrCpy(BootPath, L"\\EFI\\BOOT\\grubx64.efi");
+    if (BootPath[0] == L'\0')   StrCpy(BootPath, L"\\EFI\\BOOT\\bootx64.efi");
 
     // ==========================================
     // 4. 執行動作一：靜默載入並啟動 DXE 驅動（例如手把驅動）
