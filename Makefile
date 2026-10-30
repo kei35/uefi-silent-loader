@@ -2,7 +2,6 @@ ARCH            = x86_64
 OBJS            = main.o
 TARGET          = loader.efi
 
-# 支援外部帶入版本字串
 VERSION         ?= UNKNOWN
 
 EFIINC          = /usr/include/efi
