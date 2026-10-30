@@ -1,18 +1,36 @@
-TARGET   = loader.efi
-SOURCE   = loader.c
-OBJS     = loader.o
+ARCH            = x86_64
+OBJS            = main.o
+TARGET          = loader.efi
 
-CC       = x86_64-w64-mingw32-gcc
-CFLAGS   = -I/usr/include/efi -I/usr/include/efi/x86_64 -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -Wall
-LDFLAGS  = -nostdlib -znocombreloc -T /usr/lib/elf_x86_64_efi.lds -shared -Bsymbolic -L/usr/lib -lefi -lgnuefi
+# 支援外部帶入版本字串
+VERSION         ?= UNKNOWN
+
+EFIINC          = /usr/include/efi
+EFIINCS         = -I$(EFIINC) -I$(EFIINC)/$(ARCH) -I$(EFIINC)/protocol
+LIB             = /usr/lib
+EFILIB          = /usr/lib
+EFI_CRT_OBJS    = $(LIB)/crt0-efi-$(ARCH).o
+EFI_LDS         = $(LIB)/elf_x86_64_efi.lds
+
+CFLAGS          = $(EFIINCS) -O2 -fno-stack-protector -fpic -fshort-wchar -mno-red-zone -Wall \
+                  -DVERSION_STR=\"$(VERSION)\"
+
+ifeq ($(ARCH),x86_64)
+CFLAGS          += -DEFI_FUNCTION_WRAPPER
+endif
+
+LDFLAGS         = -nostdlib -znocombreloc -T $(EFI_LDS) -shared -Bsymbolic $(EFI_CRT_OBJS) -L $(EFILIB) -lefi -lgnuefi
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS)
-    $(CC) $(OBJS) -o $@ $(LDFLAGS)
+%.so: %.o
+	ld $(LDFLAGS) $^ -o $@ -lefi -lgnuefi
 
-%.o: %.c
-    $(CC) $(CFLAGS) -c $< -o $@
+%.efi: %.so
+	objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-$(ARCH) $< $@
+
+main.o: main.c
+	gcc $(CFLAGS) -c $< -o $@
 
 clean:
-    rm -f $(OBJS) $(TARGET)
+	rm -rf *.o *.so *.efi
