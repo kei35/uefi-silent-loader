@@ -109,7 +109,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&LoadedImage);
     if (EFI_ERROR(Status) || LoadedImage == NULL) {
         Print(L"[Error] Failed to get LoadedImage protocol!\n");
-        goto 停頓等待;
+        goto 暫停等待按鍵;
     }
 
     EFI_HANDLE DeviceHandle = LoadedImage->DeviceHandle;
@@ -120,19 +120,18 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (VOID**)&FileSystem);
     if (EFI_ERROR(Status) || FileSystem == NULL) {
         Print(L"[Error] Failed to get FileSystem protocol!\n");
-        goto 停頓等待;
+        goto 暫停等待按鍵;
     }
 
     Status = uefi_call_wrapper(FileSystem->OpenVolume, 2, FileSystem, &RootDir);
     if (EFI_ERROR(Status) || RootDir == NULL) {
         Print(L"[Error] Failed to open Volume root dir!\n");
-        goto 停頓等待;
+        goto 暫停等待按鍵;
     }
 
     GetSameDirIniPath(LoadedImage->FilePath, IniPath, MAX_PATH_LEN);
     Print(L"[Loader] Opening loader.ini (Read-Only)...\n");
 
-    // 僅以唯讀模式開啟，完美避開寫檔引起的 #GP 例外
     Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &IniFile, IniPath, EFI_FILE_MODE_READ, 0);
     
     if (EFI_ERROR(Status) || IniFile == NULL) {
@@ -178,7 +177,32 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     }
 
     Print(L"[Loader] Handing over to Bootloader: %s\n", BootPath);
+
+暫停等待按鍵:
+    // =========================================================================
+    // 【按任意鍵繼續】機制
+    // =========================================================================
+    Print(L"\n--------------------------------------------------\n");
+    Print(L"[PAUSE] Logs displayed above. Press ANY KEY to continue...\n");
+    Print(L"--------------------------------------------------\n");
+
+    EFI_INPUT_KEY Key;
+    
+    // 1. 先清空鍵盤緩衝區中殘餘的按鍵
+    while (uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key) == EFI_SUCCESS) {
+        // 持續讀取直到清空
+    }
+
+    // 2. 透過事件等待機制，卡住 CPU 直到偵測到鍵盤輸入
+    UINTN EventIndex;
+    uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
+
+    // 3. 讀取並消耗掉剛剛按下的那一顆按鍵
+    uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
+
+    // =========================================================================
     // 2. 載入並交棒給下一個開機引導器
+    // =========================================================================
     if (DeviceHandle != NULL && BootPath[0] != L'\0') {
         EFI_HANDLE BootHandle;
         EFI_DEVICE_PATH *BootDevicePath = FileDevicePath(DeviceHandle, BootPath);
@@ -190,12 +214,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
                 Print(L"[Error] LoadImage failed for bootloader! Status: %r\n", Status);
             }
         }
-    }
-
-停頓等待:
-    // 強制迴圈定格 5 秒，確保畫面能看清所有 Log 訊息
-    for (int i = 0; i < 20; i++) {
-        uefi_call_wrapper(BS->Stall, 1, 1000000);
     }
 
     return EFI_SUCCESS;
