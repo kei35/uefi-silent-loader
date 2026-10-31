@@ -9,6 +9,15 @@
 #define VERSION_STR "UNKNOWN"
 #endif
 
+// 自訂安全 AsciiStrLen，避免依賴外部標頭檔宣告
+UINTN SafeAsciiStrLen(CONST CHAR8 *Str) {
+    UINTN Len = 0;
+    while (Str && Str[Len] != '\0') {
+        Len++;
+    }
+    return Len;
+}
+
 // ==========================================
 // 1. 字串轉換輔助函式：將 ASCII 轉為 UEFI 使用的 Unicode (CHAR16)
 // ==========================================
