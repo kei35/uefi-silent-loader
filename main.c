@@ -4,6 +4,15 @@
 #define MAX_PATH_LEN 256
 #define BUFFER_SIZE  1024
 
+// 自訂安全字串長度計算
+UINTN SafeAsciiStrLen(CONST CHAR8 *Str) {
+    UINTN Len = 0;
+    while (Str && Str[Len] != '\0') {
+        Len++;
+    }
+    return Len;
+}
+
 VOID AsciiToUnicode(CHAR8 *src, CHAR16 *dst, UINTN max_len) {
     UINTN i = 0;
     while (src[i] != '\0' && src[i] != '\r' && src[i] != '\n' && i < (max_len - 1)) {
@@ -100,7 +109,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&LoadedImage);
     if (EFI_ERROR(Status) || LoadedImage == NULL) {
         Print(L"[Error] Failed to get LoadedImage protocol!\n");
-        return Status;
+        goto 停頓等待;
     }
 
     EFI_HANDLE DeviceHandle = LoadedImage->DeviceHandle;
@@ -111,19 +120,19 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (VOID**)&FileSystem);
     if (EFI_ERROR(Status) || FileSystem == NULL) {
         Print(L"[Error] Failed to get FileSystem protocol!\n");
-        return Status;
+        goto 停頓等待;
     }
 
     Status = uefi_call_wrapper(FileSystem->OpenVolume, 2, FileSystem, &RootDir);
     if (EFI_ERROR(Status) || RootDir == NULL) {
         Print(L"[Error] Failed to open Volume root dir!\n");
-        return Status;
+        goto 停頓等待;
     }
 
     GetSameDirIniPath(LoadedImage->FilePath, IniPath, MAX_PATH_LEN);
     Print(L"[Loader] Opening loader.ini (Read-Only)...\n");
 
-    // 僅以「唯讀」模式開啟 loader.ini，絕不嘗試建立或寫入
+    // 僅以唯讀模式開啟，完美避開寫檔引起的 #GP 例外
     Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &IniFile, IniPath, EFI_FILE_MODE_READ, 0);
     
     if (EFI_ERROR(Status) || IniFile == NULL) {
@@ -183,24 +192,11 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         }
     }
 
-    // ==========================================
-    // 暫停並等待使用者按下任意鍵再繼續
-    // ==========================================
-    Print(L"\n[Loader] Press any key to continue...\n");
-
-    // 1. 宣告按鍵結構變數
-    EFI_INPUT_KEY Key;
-    
-    // 2. 清空可能殘留在緩衝區的按鍵
-    while (uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key) == EFI_SUCCESS) {
-        // 持續讀取直到緩衝區清空
+停頓等待:
+    // 強制迴圈定格 5 秒，確保畫面能看清所有 Log 訊息
+    for (int i = 0; i < 20; i++) {
+        uefi_call_wrapper(BS->Stall, 1, 1000000);
     }
 
-    // 3. 等待事件觸發（等待使用者按下鍵盤）
-    UINTN Index;
-    uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &Index);
-
-    // 4. 再次讀取剛剛那顆按鍵（將其從緩衝區消耗掉）
-    uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
     return EFI_SUCCESS;
 }
