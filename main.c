@@ -22,7 +22,7 @@ VOID AsciiToUnicode(CHAR8 *src, CHAR16 *dst, UINTN max_len) {
     dst[i] = L'\0';
 }
 
-VOID ParseConfigLine(CHAR8 *line, CHAR16 *driver_path, CHAR16 *boot_path) {
+VOID ParseConfigLine(CHAR8 *line, CHAR16 *driver_path, CHAR16 *boot_path, INTN *quiet_mode) {
     if (line[0] == '#' || line[0] == ';' || line[0] == '\r' || line[0] == '\n' || line[0] == '\0') {
         return;
     }
@@ -40,8 +40,9 @@ VOID ParseConfigLine(CHAR8 *line, CHAR16 *driver_path, CHAR16 *boot_path) {
         CHAR8 *key = line;
         CHAR8 *val = equal_sign + 1;
 
+        // 移除數值後面可能存在的註解或換行符號
         for (CHAR8 *p = val; *p != '\0'; p++) {
-            if (*p == '\r' || *p == '\n') {
+            if (*p == '\r' || *p == '\n' || *p == '#') {
                 *p = '\0';
                 break;
             }
@@ -51,6 +52,10 @@ VOID ParseConfigLine(CHAR8 *line, CHAR16 *driver_path, CHAR16 *boot_path) {
             AsciiToUnicode(val, driver_path, MAX_PATH_LEN);
         } else if (strcmpa((UINT8*)key, (UINT8*)"BOOTLOADER") == 0) {
             AsciiToUnicode(val, boot_path, MAX_PATH_LEN);
+        } else if (strcmpa((UINT8*)key, (UINT8*)"QUIET") == 0) {
+            if (val[0] == '1') {
+                *quiet_mode = 1;
+            }
         }
     }
 }
@@ -101,8 +106,7 @@ EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     InitializeLib(ImageHandle, SystemTable);
 
-    uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
-    Print(L"[Loader] Starting up (Safe Read-Only Mode)...\n");
+    INTN QuietMode = 0; // 預設值：0（顯示 Log 與按鍵暫停）
 
     EFI_STATUS Status;
     EFI_LOADED_IMAGE *LoadedImage;
@@ -119,8 +123,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&LoadedImage);
     if (EFI_ERROR(Status) || LoadedImage == NULL) {
-        Print(L"[Error] Failed to get LoadedImage protocol!\n");
-        goto 暫停等待按鍵;
+        goto EXECUTE_BOOT;
     }
 
     EFI_HANDLE DeviceHandle = LoadedImage->DeviceHandle;
@@ -130,30 +133,24 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (VOID**)&FileSystem);
     if (EFI_ERROR(Status) || FileSystem == NULL) {
-        Print(L"[Error] Failed to get FileSystem protocol!\n");
-        goto 暫停等待按鍵;
+        goto EXECUTE_BOOT;
     }
 
     Status = uefi_call_wrapper(FileSystem->OpenVolume, 2, FileSystem, &RootDir);
     if (EFI_ERROR(Status) || RootDir == NULL) {
-        Print(L"[Error] Failed to open Volume root dir!\n");
-        goto 暫停等待按鍵;
+        goto EXECUTE_BOOT;
     }
 
     GetSameDirIniPath(LoadedImage->FilePath, IniPath, MAX_PATH_LEN);
-    Print(L"[Loader] Opening loader.ini (Read-Only)...\n");
 
     Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &IniFile, IniPath, EFI_FILE_MODE_READ, 0);
     
-    if (EFI_ERROR(Status) || IniFile == NULL) {
-        Print(L"[Info] loader.ini not found. Using default paths safely.\n");
-    } else {
+    if (!EFI_ERROR(Status) && IniFile != NULL) {
         CHAR8 Buffer[BUFFER_SIZE] = {0};
         UINTN ReadSize = BUFFER_SIZE - 1;
         Status = uefi_call_wrapper(IniFile->Read, 3, IniFile, &ReadSize, Buffer);
 
         if (!EFI_ERROR(Status) && ReadSize > 0) {
-            Print(L"[Loader] Parsing loader.ini content...\n");
             Buffer[ReadSize] = '\0';
             CHAR8 *line = Buffer;
             CHAR8 *next_line = NULL;
@@ -167,19 +164,31 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
                         break;
                     }
                 }
-                ParseConfigLine(line, DriverPath, BootPath);
+                ParseConfigLine(line, DriverPath, BootPath, &QuietMode);
                 line = next_line;
             }
         }
         uefi_call_wrapper(IniFile->Close, 1, IniFile);
     }
 
-    // =========================================================================
-    // 1. 檢查 DXE 驅動檔案是否存在，存在才載入並印出訊息
-    // =========================================================================
+    // 非安靜模式下才印出啟動與解析 Log
+    if (!QuietMode) {
+        uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
+        Print(L"[Loader] Starting up (Safe Read-Only Mode)...\n");
+        Print(L"[Loader] Opening loader.ini (Read-Only)...\n");
+        if (EFI_ERROR(Status)) {
+            Print(L"[Info] loader.ini not found. Using default paths safely.\n");
+        } else {
+            Print(L"[Loader] Parsing loader.ini content...\n");
+        }
+    }
+
+    // 1. 檢查並載入 DXE 驅動
     if (DriverPath[0] != L'\0') {
         if (CheckFileExists(RootDir, DriverPath)) {
-            Print(L"[Loader] Loading DXE Driver: %s\n", DriverPath);
+            if (!QuietMode) {
+                Print(L"[Loader] Loading DXE Driver: %s\n", DriverPath);
+            }
             EFI_HANDLE DriverHandle;
             EFI_DEVICE_PATH *DriverDevicePath = FileDevicePath(DeviceHandle, DriverPath);
             if (DriverDevicePath != NULL) {
@@ -189,42 +198,46 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
                 }
             }
         } else {
-            Print(L"[Info] DXE Driver not found, skipping: %s\n", DriverPath);
+            if (!QuietMode) {
+                Print(L"[Info] DXE Driver not found, skipping: %s\n", DriverPath);
+            }
         }
     }
 
-// =========================================================================
-    // 2. 檢查 Bootloader 檔案是否存在，存在才印出載入訊息
-    // =========================================================================
+    // 2. 檢查 Bootloader 檔案是否存在
     BOOLEAN BootloaderExists = FALSE;
     if (BootPath[0] != L'\0') {
         if (CheckFileExists(RootDir, BootPath)) {
-            Print(L"[Loader] Handing over to Bootloader: %s\n", BootPath);
+            if (!QuietMode) {
+                Print(L"[Loader] Handing over to Bootloader: %s\n", BootPath);
+            }
             BootloaderExists = TRUE;
         } else {
-            Print(L"[Error] Target Bootloader not found, skipping: %s\n", BootPath);
+            if (!QuietMode) {
+                Print(L"[Error] Target Bootloader not found, skipping: %s\n", BootPath);
+            }
         }
     }
 
-暫停等待按鍵:
-    // =========================================================================
-    // 按任意鍵繼續機制
-    // =========================================================================
-    Print(L"\n--------------------------------------------------\n");
-    Print(L"[PAUSE] Logs displayed above. Press ANY KEY to continue...\n");
-    Print(L"--------------------------------------------------\n");
+    // 非安靜模式下停下來等待按鍵
+    if (!QuietMode) {
+        Print(L"\n--------------------------------------------------\n");
+        Print(L"[PAUSE] Logs displayed above. Press ANY KEY to continue...\n");
+        Print(L"--------------------------------------------------\n");
 
-    EFI_INPUT_KEY Key;
-    while (uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key) == EFI_SUCCESS) {
-        // 清空鍵盤緩衝區
+        EFI_INPUT_KEY Key;
+        while (uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key) == EFI_SUCCESS) {
+            // 清空鍵盤緩衝區
+        }
+
+        UINTN EventIndex;
+        uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
+        uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
     }
 
-    UINTN EventIndex;
-    uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
-    uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
-
-    // 真正執行交棒給 Bootloader
-    if (DeviceHandle != NULL && BootPath[0] != L'\0' && CheckFileExists(RootDir, BootPath)) {
+EXECUTE_BOOT:
+    // 3. 真正執行交棒給 Bootloader
+    if (DeviceHandle != NULL && BootPath[0] != L'\0') {
         EFI_HANDLE BootHandle;
         EFI_DEVICE_PATH *BootDevicePath = FileDevicePath(DeviceHandle, BootPath);
         if (BootDevicePath != NULL) {
@@ -232,7 +245,9 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
             if (!EFI_ERROR(Status)) {
                 uefi_call_wrapper(BS->StartImage, 3, BootHandle, NULL, NULL);
             } else {
-                Print(L"[Error] LoadImage failed for bootloader! Status: %r\n", Status);
+                if (!QuietMode) {
+                    Print(L"[Error] LoadImage failed for bootloader! Status: %r\n", Status);
+                }
             }
         }
     }
