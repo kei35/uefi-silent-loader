@@ -22,11 +22,6 @@ EFI_LDS         = $(LDSCRIPT)
 # =====================================================================
 # 核心編譯參數設定（關鍵防禦區段）
 # =====================================================================
-# 說明：
-# 1. -mno-sse, -mno-avx, -mno-mmx : 嚴格禁止產生任何向量暫存器指令
-# 2. -msoft-float                : 使用軟體模擬浮點運算，避免觸碰硬體 FPU
-# 3. -fno-stack-protector        : UEFI 環境無標準 C 函式庫，必須關閉堆疊保護
-# =====================================================================
 CFLAGS          = $(EFIINCS) -O2 -fno-stack-protector -fpic -fshort-wchar \
                   -mno-red-zone -mno-sse -mno-avx -mno-mmx -msoft-float \
                   -Wall -Wno-pointer-sign \
@@ -38,11 +33,12 @@ LDFLAGS         = -nostdlib -znocombreloc -T $(EFI_LDS) -shared \
 # 完整編譯流程
 all: $(TARGET)
 
-# 將主程式編譯為共享物件 (.so)
+# 將主程式編譯為物件檔
 main.o: main.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-main.so: main.o
+# 將物件檔連結為 loader.so（名稱需與 TARGET 呼叫的相符）
+loader.so: main.o
 	$(LD) $(LDFLAGS) $< -lefi -lgnuefi -o $@
 
 # 將 .so 轉換為標準 UEFI 執行檔 (.efi)
