@@ -183,6 +183,24 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         }
     }
 
-    uefi_call_wrapper(BS->Stall, 1, 12000000); // 暫停 12 秒
+    // ==========================================
+    // 暫停並等待使用者按下任意鍵再繼續
+    // ==========================================
+    Print(L"\n[Loader] Press any key to continue...\n");
+
+    // 1. 宣告按鍵結構變數
+    EFI_INPUT_KEY Key;
+    
+    // 2. 清空可能殘留在緩衝區的按鍵
+    while (uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key) == EFI_SUCCESS) {
+        // 持續讀取直到緩衝區清空
+    }
+
+    // 3. 等待事件觸發（等待使用者按下鍵盤）
+    UINTN Index;
+    uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &Index);
+
+    // 4. 再次讀取剛剛那顆按鍵（將其從緩衝區消耗掉）
+    uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
     return EFI_SUCCESS;
 }
