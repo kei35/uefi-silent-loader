@@ -90,7 +90,7 @@ EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     InitializeLib(ImageHandle, SystemTable);
 
-    // 清畫面並印出啟動訊息，確保畫面看得見進度
+    // 清畫面並印出啟動訊息
     uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
     Print(L"[Loader] Starting up...\n");
 
@@ -150,10 +150,21 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         Status = uefi_call_wrapper(IniFile->Read, 3, IniFile, &ReadSize, Buffer);
 
         if (EFI_ERROR(Status) || ReadSize == 0) {
-            Print(L"[Loader] loader.ini is empty. Writing defaults...\n");
-            UINTN WriteSize = SafeAsciiStrLen(DefaultConfig);
+            Print(L"[Loader] loader.ini is empty. Writing defaults safely...\n");
+            
+            // 確保指針歸零
             uefi_call_wrapper(IniFile->SetPosition, 2, IniFile, 0);
-            uefi_call_wrapper(IniFile->Write, 3, IniFile, &WriteSize, DefaultConfig);
+            
+            // 使用安全的 UINTN 傳遞寫入長度
+            UINTN WriteSize = SafeAsciiStrLen(DefaultConfig);
+            Status = uefi_call_wrapper(IniFile->Write, 3, IniFile, &WriteSize, (VOID*)DefaultConfig);
+            
+            if (EFI_ERROR(Status)) {
+                Print(L"[Error] Failed to write default config! Status: %r\n", Status);
+                uefi_call_wrapper(BS->Stall, 1, 3000000);
+            } else {
+                Print(L"[Loader] Defaults written successfully!\n");
+            }
             
             StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
             StrCpy(BootPath, L"\\EFI\\BOOT\\bootx64.efi");
@@ -198,8 +209,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         }
     }
 
-    // 暫停一下讓使用者看清楚畫面的 Print 訊息
-    uefi_call_wrapper(BS->Stall, 1, 3000000); // 暫停 3 秒
+    uefi_call_wrapper(BS->Stall, 1, 2000000); // 暫停 2 秒
 
     return EFI_SUCCESS;
 }
