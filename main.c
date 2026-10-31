@@ -193,14 +193,16 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         }
     }
 
+// =========================================================================
+    // 2. 檢查 Bootloader 檔案是否存在，存在才印出載入訊息
     // =========================================================================
-    // 2. 檢查 Bootloader 檔案是否存在，存在才交棒
-    // =========================================================================
+    BOOLEAN BootloaderExists = FALSE;
     if (BootPath[0] != L'\0') {
         if (CheckFileExists(RootDir, BootPath)) {
             Print(L"[Loader] Handing over to Bootloader: %s\n", BootPath);
+            BootloaderExists = TRUE;
         } else {
-            Print(L"[Error] Target Bootloader not found: %s\n", BootPath);
+            Print(L"[Error] Target Bootloader not found, skipping: %s\n", BootPath);
         }
     }
 
