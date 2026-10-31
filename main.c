@@ -4,15 +4,6 @@
 #define MAX_PATH_LEN 256
 #define BUFFER_SIZE  1024
 
-// 自訂安全字串長度計算
-UINTN SafeAsciiStrLen(CONST CHAR8 *Str) {
-    UINTN Len = 0;
-    while (Str && Str[Len] != '\0') {
-        Len++;
-    }
-    return Len;
-}
-
 VOID AsciiToUnicode(CHAR8 *src, CHAR16 *dst, UINTN max_len) {
     UINTN i = 0;
     while (src[i] != '\0' && src[i] != '\r' && src[i] != '\n' && i < (max_len - 1)) {
@@ -90,9 +81,8 @@ EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     InitializeLib(ImageHandle, SystemTable);
 
-    // 清畫面並印出啟動訊息
     uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
-    Print(L"[Loader] Starting up...\n");
+    Print(L"[Loader] Starting up (Safe Read-Only Mode)...\n");
 
     EFI_STATUS Status;
     EFI_LOADED_IMAGE *LoadedImage;
@@ -103,7 +93,10 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     CHAR16 DriverPath[MAX_PATH_LEN] = {0};
     CHAR16 BootPath[MAX_PATH_LEN] = {0};
 
-    // 1. 取得 LoadedImage
+    // 預設後備路徑
+    StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
+    StrCpy(BootPath, L"\\EFI\\BOOT\\bootx64.efi");
+
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&LoadedImage);
     if (EFI_ERROR(Status) || LoadedImage == NULL) {
         Print(L"[Error] Failed to get LoadedImage protocol!\n");
@@ -115,7 +108,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         DeviceHandle = ImageHandle;
     }
 
-    // 2. 取得檔案系統
     Status = uefi_call_wrapper(BS->HandleProtocol, 3, DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (VOID**)&FileSystem);
     if (EFI_ERROR(Status) || FileSystem == NULL) {
         Print(L"[Error] Failed to get FileSystem protocol!\n");
@@ -129,47 +121,20 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     }
 
     GetSameDirIniPath(LoadedImage->FilePath, IniPath, MAX_PATH_LEN);
-    Print(L"[Loader] Ini path resolved. Opening ini...\n");
+    Print(L"[Loader] Opening loader.ini (Read-Only)...\n");
 
-    CHAR8 *DefaultConfig = 
-        "# UEFI Silent Loader Config\n"
-        "DRIVER=\\EFI\\drivers\\UsbXbox360Dxe.efi\n"
-        "BOOTLOADER=\\EFI\\BOOT\\bootx64.efi\n";
-
-    // 3. 開啟或建立 loader.ini
-    Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &IniFile, IniPath, 
-                               EFI_FILE_MODE_CREATE | EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE, 0);
+    // 僅以「唯讀」模式開啟 loader.ini，絕不嘗試建立或寫入
+    Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &IniFile, IniPath, EFI_FILE_MODE_READ, 0);
     
     if (EFI_ERROR(Status) || IniFile == NULL) {
-        Print(L"[Warning] Could not open/create loader.ini, using fallbacks.\n");
-        StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
-        StrCpy(BootPath, L"\\EFI\\BOOT\\bootx64.efi");
+        Print(L"[Info] loader.ini not found. Using default paths safely.\n");
     } else {
         CHAR8 Buffer[BUFFER_SIZE] = {0};
         UINTN ReadSize = BUFFER_SIZE - 1;
         Status = uefi_call_wrapper(IniFile->Read, 3, IniFile, &ReadSize, Buffer);
 
-        if (EFI_ERROR(Status) || ReadSize == 0) {
-            Print(L"[Loader] loader.ini is empty. Writing defaults safely...\n");
-            
-            // 確保指針歸零
-            uefi_call_wrapper(IniFile->SetPosition, 2, IniFile, 0);
-            
-            // 使用安全的 UINTN 傳遞寫入長度
-            UINTN WriteSize = SafeAsciiStrLen(DefaultConfig);
-            Status = uefi_call_wrapper(IniFile->Write, 3, IniFile, &WriteSize, (VOID*)DefaultConfig);
-            
-            if (EFI_ERROR(Status)) {
-                Print(L"[Error] Failed to write default config! Status: %r\n", Status);
-                uefi_call_wrapper(BS->Stall, 1, 3000000);
-            } else {
-                Print(L"[Loader] Defaults written successfully!\n");
-            }
-            
-            StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
-            StrCpy(BootPath, L"\\EFI\\BOOT\\bootx64.efi");
-        } else {
-            Print(L"[Loader] Parsing existing loader.ini...\n");
+        if (!EFI_ERROR(Status) && ReadSize > 0) {
+            Print(L"[Loader] Parsing loader.ini content...\n");
             Buffer[ReadSize] = '\0';
             CHAR8 *line = Buffer;
             CHAR8 *next_line = NULL;
@@ -190,12 +155,21 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         uefi_call_wrapper(IniFile->Close, 1, IniFile);
     }
 
-    if (DriverPath[0] == L'\0') StrCpy(DriverPath, L"\\EFI\\drivers\\UsbXbox360Dxe.efi");
-    if (BootPath[0] == L'\0')   StrCpy(BootPath, L"\\EFI\\BOOT\\bootx64.efi");
+    Print(L"[Loader] Loading DXE Driver: %s\n", DriverPath);
+    // 1. 載入並啟動 DXE 驅動
+    if (DeviceHandle != NULL && DriverPath[0] != L'\0') {
+        EFI_HANDLE DriverHandle;
+        EFI_DEVICE_PATH *DriverDevicePath = FileDevicePath(DeviceHandle, DriverPath);
+        if (DriverDevicePath != NULL) {
+            Status = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, DriverDevicePath, NULL, 0, &DriverHandle);
+            if (!EFI_ERROR(Status)) {
+                uefi_call_wrapper(BS->StartImage, 3, DriverHandle, NULL, NULL);
+            }
+        }
+    }
 
-    Print(L"[Loader] Handing over to next bootloader...\n");
-
-    // 4. 載入並啟動引導器
+    Print(L"[Loader] Handing over to Bootloader: %s\n", BootPath);
+    // 2. 載入並交棒給下一個開機引導器
     if (DeviceHandle != NULL && BootPath[0] != L'\0') {
         EFI_HANDLE BootHandle;
         EFI_DEVICE_PATH *BootDevicePath = FileDevicePath(DeviceHandle, BootPath);
@@ -210,6 +184,5 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     }
 
     uefi_call_wrapper(BS->Stall, 1, 2000000); // 暫停 2 秒
-
     return EFI_SUCCESS;
 }
