@@ -183,6 +183,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         }
     }
 
-    uefi_call_wrapper(BS->Stall, 1, 2000000); // 暫停 2 秒
+    uefi_call_wrapper(BS->Stall, 1, 12000000); // 暫停 12 秒
     return EFI_SUCCESS;
 }
