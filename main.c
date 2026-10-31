@@ -8,7 +8,7 @@
 // 【Log 功能總開關】
 // 設為 1 代表開啟 Log 寫入功能，設為 0 則完全關閉
 // ==========================================
-#define ENABLE_LOGGING 1
+#define ENABLE_LOGGING 0
 
 // 定義版本戳記（由 Makefile 在編譯時透過 -DVERSION 注入時間戳記）
 #ifndef VERSION_STR
