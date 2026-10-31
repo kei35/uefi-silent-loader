@@ -85,6 +85,17 @@ VOID GetSameDirIniPath(EFI_DEVICE_PATH *FilePath, CHAR16 *IniPath, UINTN MaxLen)
     }
 }
 
+// 輔助函式：檢查指定路徑的檔案是否存在
+BOOLEAN CheckFileExists(EFI_FILE_HANDLE RootDir, CHAR16 *FilePath) {
+    EFI_FILE_HANDLE TestFile;
+    EFI_STATUS Status = uefi_call_wrapper(RootDir->Open, 5, RootDir, &TestFile, FilePath, EFI_FILE_MODE_READ, 0);
+    if (!EFI_ERROR(Status) && TestFile != NULL) {
+        uefi_call_wrapper(TestFile->Close, 1, TestFile);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 EFI_STATUS
 EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
@@ -163,47 +174,55 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
         uefi_call_wrapper(IniFile->Close, 1, IniFile);
     }
 
-    Print(L"[Loader] Loading DXE Driver: %s\n", DriverPath);
-    // 1. 載入並啟動 DXE 驅動
-    if (DeviceHandle != NULL && DriverPath[0] != L'\0') {
-        EFI_HANDLE DriverHandle;
-        EFI_DEVICE_PATH *DriverDevicePath = FileDevicePath(DeviceHandle, DriverPath);
-        if (DriverDevicePath != NULL) {
-            Status = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, DriverDevicePath, NULL, 0, &DriverHandle);
-            if (!EFI_ERROR(Status)) {
-                uefi_call_wrapper(BS->StartImage, 3, DriverHandle, NULL, NULL);
+    // =========================================================================
+    // 1. 檢查 DXE 驅動檔案是否存在，存在才載入並印出訊息
+    // =========================================================================
+    if (DriverPath[0] != L'\0') {
+        if (CheckFileExists(RootDir, DriverPath)) {
+            Print(L"[Loader] Loading DXE Driver: %s\n", DriverPath);
+            EFI_HANDLE DriverHandle;
+            EFI_DEVICE_PATH *DriverDevicePath = FileDevicePath(DeviceHandle, DriverPath);
+            if (DriverDevicePath != NULL) {
+                Status = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, DriverDevicePath, NULL, 0, &DriverHandle);
+                if (!EFI_ERROR(Status)) {
+                    uefi_call_wrapper(BS->StartImage, 3, DriverHandle, NULL, NULL);
+                }
             }
+        } else {
+            Print(L"[Info] DXE Driver not found, skipping: %s\n", DriverPath);
         }
     }
 
-    Print(L"[Loader] Handing over to Bootloader: %s\n", BootPath);
+    // =========================================================================
+    // 2. 檢查 Bootloader 檔案是否存在，存在才交棒
+    // =========================================================================
+    if (BootPath[0] != L'\0') {
+        if (CheckFileExists(RootDir, BootPath)) {
+            Print(L"[Loader] Handing over to Bootloader: %s\n", BootPath);
+        } else {
+            Print(L"[Error] Target Bootloader not found: %s\n", BootPath);
+        }
+    }
 
 暫停等待按鍵:
     // =========================================================================
-    // 【按任意鍵繼續】機制
+    // 按任意鍵繼續機制
     // =========================================================================
     Print(L"\n--------------------------------------------------\n");
     Print(L"[PAUSE] Logs displayed above. Press ANY KEY to continue...\n");
     Print(L"--------------------------------------------------\n");
 
     EFI_INPUT_KEY Key;
-    
-    // 1. 先清空鍵盤緩衝區中殘餘的按鍵
     while (uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key) == EFI_SUCCESS) {
-        // 持續讀取直到清空
+        // 清空鍵盤緩衝區
     }
 
-    // 2. 透過事件等待機制，卡住 CPU 直到偵測到鍵盤輸入
     UINTN EventIndex;
     uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
-
-    // 3. 讀取並消耗掉剛剛按下的那一顆按鍵
     uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &Key);
 
-    // =========================================================================
-    // 2. 載入並交棒給下一個開機引導器
-    // =========================================================================
-    if (DeviceHandle != NULL && BootPath[0] != L'\0') {
+    // 真正執行交棒給 Bootloader
+    if (DeviceHandle != NULL && BootPath[0] != L'\0' && CheckFileExists(RootDir, BootPath)) {
         EFI_HANDLE BootHandle;
         EFI_DEVICE_PATH *BootDevicePath = FileDevicePath(DeviceHandle, BootPath);
         if (BootDevicePath != NULL) {
