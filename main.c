@@ -184,25 +184,42 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     }
 
     // 1. 檢查並載入 DXE 驅動
-    if (DriverPath[0] != L'\0') {
-        if (CheckFileExists(RootDir, DriverPath)) {
-            if (!QuietMode) {
-                Print(L"[Loader] Loading DXE Driver: %s\n", DriverPath);
-            }
-            EFI_HANDLE DriverHandle;
-            EFI_DEVICE_PATH *DriverDevicePath = FileDevicePath(DeviceHandle, DriverPath);
-            if (DriverDevicePath != NULL) {
-                Status = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, DriverDevicePath, NULL, 0, &DriverHandle);
-                if (!EFI_ERROR(Status)) {
-                    uefi_call_wrapper(BS->StartImage, 3, DriverHandle, NULL, NULL);
+        if (DriverPath[0] != L'\0') {
+            if (CheckFileExists(RootDir, DriverPath)) {
+                if (!QuietMode) {
+                    Print(L"[Loader] Loading DXE Driver: %s\n", DriverPath);
+                }
+                EFI_HANDLE DriverHandle;
+                EFI_DEVICE_PATH *DriverDevicePath = FileDevicePath(DeviceHandle, DriverPath);
+                if (DriverDevicePath != NULL) {
+                    Status = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, DriverDevicePath, NULL, 0, &DriverHandle);
+                    if (!EFI_ERROR(Status)) {
+                        // 執行驅動的 Entry Point（註冊 Driver Binding Protocol）
+                        uefi_call_wrapper(BS->StartImage, 3, DriverHandle, NULL, NULL);
+    
+                        if (!QuietMode) {
+                            Print(L"[Loader] Forcing controller connection for DXE binding...\n");
+                        }
+    
+                        // 【新增】強制掃描所有裝置控制代碼，觸發 Driver Binding
+                        EFI_HANDLE *HandleBuffer = NULL;
+                        UINTN HandleCount = 0;
+                        Status = uefi_call_wrapper(BS->LocateHandleBuffer, 5, ByProtocol, &gEfiDevicePathProtocolGuid, NULL, &HandleCount, &HandleBuffer);
+                        if (!EFI_ERROR(Status) && HandleBuffer != NULL) {
+                            for (UINTN i = 0; i < HandleCount; i++) {
+                                // 呼叫 ConnectController 讓註冊好的驅動去配對並接管硬體 (Recursive = TRUE)
+                                uefi_call_wrapper(BS->ConnectController, 4, HandleBuffer[i], NULL, NULL, TRUE);
+                            }
+                            FreePool(HandleBuffer);
+                        }
+                    }
+                }
+            } else {
+                if (!QuietMode) {
+                    Print(L"[Info] DXE Driver not found, skipping: %s\n", DriverPath);
                 }
             }
-        } else {
-            if (!QuietMode) {
-                Print(L"[Info] DXE Driver not found, skipping: %s\n", DriverPath);
-            }
         }
-    }
 
     // 2. 檢查 Bootloader 檔案是否存在
     BOOLEAN BootloaderExists = FALSE;
