@@ -22,10 +22,9 @@ jobs:
 
       - name: Setup EDK II Workspace and Build
         run: |
-          # 1. 直接在當前工作目錄下 clone edk2，避免 /opt 權限問題
-          git clone --depth 1 https://github.com/tianocore/edk2.git edk2
+          # 1. 完整複製 edk2 與所有巢狀子模組（包含 BaseTools 依賴的 Brotli）
+          git clone --recurse-submodules --depth 1 https://github.com/tianocore/edk2.git edk2
           cd edk2
-          git submodule update --init --recursive MdePkg
 
           # 2. 將倉庫中的 loader 與 dsc 複製到 edk2 目錄中
           mkdir -p loader
