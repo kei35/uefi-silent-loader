@@ -10,40 +10,46 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: tianocore/containers:ubuntu-22.04
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential uuid-dev iasl git python3
+
       - name: Setup EDK II Workspace and Build
         run: |
-          # 下載 edk2 核心與 MdePkg
-          git clone --depth 1 https://github.com/tianocore/edk2.git /opt/edk2
-          cd /opt/edk2
+          # 1. 直接在當前工作目錄下 clone edk2，避免 /opt 權限問題
+          git clone --depth 1 https://github.com/tianocore/edk2.git edk2
+          cd edk2
           git submodule update --init --recursive MdePkg
 
-          # 將當前自訂目錄複製到 edk2 中
-          mkdir -p /opt/edk2/loader
-          cp -r $GITHUB_WORKSPACE/loader/* /opt/edk2/loader/
-          cp $GITHUB_WORKSPACE/XboxPkg.dsc /opt/edk2/
+          # 2. 將倉庫中的 loader 與 dsc 複製到 edk2 目錄中
+          mkdir -p loader
+          cp -r $GITHUB_WORKSPACE/loader/* loader/
+          cp $GITHUB_WORKSPACE/XboxPkg.dsc ./
 
-          # 編譯 BaseTools 並建置應用程式
+          # 3. 編譯 BaseTools 並執行 edksetup
           make -C BaseTools
+          export EDK_TOOLS_PATH=$PWD/BaseTools
           . edksetup.sh
-          build -p XboxPkg/XboxPkg.dsc -a X64 -t GCC5 -b RELEASE
+          
+          # 4. 開始編譯 UEFI 應用程式
+          build -p XboxPkg.dsc -a X64 -t GCC5 -b RELEASE
 
       - name: Package with Timestamp
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          BUILD_DIR="/opt/edk2/Build/XboxPkg/RELEASE_GCC5/X64"
+          BUILD_DIR="edk2/Build/XboxPkg/RELEASE_GCC5/X64"
           
-          mkdir -p $GITHUB_WORKSPACE/output
+          mkdir -p output
           
           # 複製標準命名與帶時間戳記的檔案
-          cp "$BUILD_DIR/loader.efi" "$GITHUB_WORKSPACE/output/loader.efi"
-          cp "$BUILD_DIR/loader.efi" "$GITHUB_WORKSPACE/output/loader-$TIMESTAMP.efi"
+          cp "$BUILD_DIR/loader.efi" "output/loader.efi"
+          cp "$BUILD_DIR/loader.efi" "output/loader-$TIMESTAMP.efi"
           
           echo "Generated loader-$TIMESTAMP.efi successfully."
 
