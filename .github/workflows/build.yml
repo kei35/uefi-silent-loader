@@ -1,0 +1,54 @@
+name: Build UEFI Loader
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: tianocore/containers:ubuntu-22.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup EDK II Workspace and Build
+        run: |
+          # 下載 edk2 核心與 MdePkg
+          git clone --depth 1 https://github.com/tianocore/edk2.git /opt/edk2
+          cd /opt/edk2
+          git submodule update --init --recursive MdePkg
+
+          # 將當前自訂目錄複製到 edk2 中
+          mkdir -p /opt/edk2/loader
+          cp -r $GITHUB_WORKSPACE/loader/* /opt/edk2/loader/
+          cp $GITHUB_WORKSPACE/XboxPkg.dsc /opt/edk2/
+
+          # 編譯 BaseTools 並建置應用程式
+          make -C BaseTools
+          . edksetup.sh
+          build -p XboxPkg/XboxPkg.dsc -a X64 -t GCC5 -b RELEASE
+
+      - name: Package with Timestamp
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BUILD_DIR="/opt/edk2/Build/XboxPkg/RELEASE_GCC5/X64"
+          
+          mkdir -p $GITHUB_WORKSPACE/output
+          
+          # 複製標準命名與帶時間戳記的檔案
+          cp "$BUILD_DIR/loader.efi" "$GITHUB_WORKSPACE/output/loader.efi"
+          cp "$BUILD_DIR/loader.efi" "$GITHUB_WORKSPACE/output/loader-$TIMESTAMP.efi"
+          
+          echo "Generated loader-$TIMESTAMP.efi successfully."
+
+      - name: Upload EFI Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEFI-Loader-${{ github.sha }}
+          path: output/
