@@ -22,7 +22,7 @@ jobs:
 
       - name: Setup EDK II Workspace and Build
         run: |
-          # 1. 完整複製 edk2 與所有巢狀子模組（包含 BaseTools 依賴的 Brotli）
+          # 1. 完整複製 edk2 與所有巢狀子模組
           git clone --recurse-submodules --depth 1 https://github.com/tianocore/edk2.git edk2
           cd edk2
 
@@ -31,12 +31,15 @@ jobs:
           cp -r $GITHUB_WORKSPACE/loader/* loader/
           cp $GITHUB_WORKSPACE/XboxPkg.dsc ./
 
-          # 3. 編譯 BaseTools 並執行 edksetup
+          # 3. 編譯 BaseTools 並初始化環境
           make -C BaseTools
           export EDK_TOOLS_PATH=$PWD/BaseTools
           . edksetup.sh
-          
-          # 4. 開始編譯 UEFI 應用程式
+
+          # 4. 強制指定 GCC5 的工具鏈前綴指向系統預設的 gcc/g++
+          export GCC5_X64_PREFIX=gcc
+
+          # 5. 開始編譯 UEFI 應用程式
           build -p XboxPkg.dsc -a X64 -t GCC5 -b RELEASE
 
       - name: Package with Timestamp
