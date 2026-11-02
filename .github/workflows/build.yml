@@ -40,7 +40,7 @@ jobs:
           export GCC5_X64_PREFIX=gcc
 
           # 5. 開始編譯 UEFI 應用程式
-          build -p XboxPkg.dsc -a X64 -t GCC5 -b RELEASE
+          build -p XboxPkg.dsc -a X64 -t GCC -b RELEASE
 
       - name: Package with Timestamp
         run: |
