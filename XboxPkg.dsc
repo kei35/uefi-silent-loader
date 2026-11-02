@@ -20,6 +20,7 @@
   DebugLib|MdePkg/Library/BaseDebugLibNull/BaseDebugLibNull.inf
   PrintLib|MdePkg/Library/BasePrintLib/BasePrintLib.inf
   PcdLib|MdePkg/Library/BasePcdLibNull/BasePcdLibNull.inf
+  RegisterFilterLib|MdePkg/Library/BaseRegisterFilterLibNull/BaseRegisterFilterLibNull.inf
 
 [Components]
   loader/loader.inf
